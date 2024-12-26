@@ -11,7 +11,7 @@ if (op == 0) { //send int_msg
 var mode = body.loadUint(8);
 var ref = body.loadRef().beginParse();
 var head = ref.loadUint(4); // 0110 = 6 | 0100 = 4 | 0000 = 0
-var src = ref.loadAddressAny();
+var src = ref.loadAddressAny(); //loadUint(2); // 00 = addr_none
 var destAddress = ref.loadAddress();
 var value = ref.loadCoins();
 var ihr = ref.skip(1).loadCoins();
@@ -32,22 +32,21 @@ if (op == 3) {
 }
 
 console.log(
-    '\n',
-    extHash, '\n',
-    msg, '\n',
-    op, '\n',
-    mode,'\n',
-    head,'\n',
-    src,'\n',
-    destAddress,'\n',
-    value,'\n',
-    ihr,'\n',
-    fwd,'\n',
-    lt_create,'\n',
-    unix_create,'\n',
-    isInit,'\n',
-    isBodyRef,'\n',
-    ref
+    '\n Hash:', extHash,
+    '\n', msg,
+    '\n Ext_msg OP:', op,
+    '\n In_msg mode:', mode,
+    '\n First 4 bit of in_msg in decimal: ', head,
+    '\n Src_addr: ', src,
+    '\n Dst_addr: ', destAddress,
+    '\n msg_value:', value,
+    '\n IHR fee: ', ihr,
+    '\n FWD fee: ', fwd,
+    '\n lt:   ', lt_create,
+    '\n unix: ', unix_create,
+    '\n Init present? ', isInit,
+    '\n Body in ref?  ', isBodyRef,
+    '\n Rest of the msg_body: ', ref
 );
 
 /*
