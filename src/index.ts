@@ -8,18 +8,18 @@ const msg = loadMessage(Cell.fromBase64(extBoC).beginParse());
 const body = msg.body.beginParse().skip(512+32+32+32); //skip singnature, subwallet, vali_until, seqno
 const op = body.loadUint(8);
 if (op == 0) { //send int_msg
-var mode = body.loadUint(8);
-var ref = body.loadRef().beginParse();
-var head = ref.loadUint(4); // 0110 = 6 | 0100 = 4 | 0000 = 0
-var src = ref.loadAddressAny(); //loadUint(2); // 00 = addr_none
-var destAddress = ref.loadAddress();
-var value = ref.loadCoins();
-var ihr = ref.skip(1).loadCoins();
-var fwd = ref.loadCoins();
-var lt_create = ref.loadUint(64);
-var unix_create = ref.loadUint(32);
-var isInit = ref.loadBit();
-var isBodyRef = ref.loadBit();
+    var mode = body.loadUint(8);
+    var ref = body.loadRef().beginParse();
+    var head = ref.loadUint(4); // 0110 = 6 | 0100 = 4 | 0000 = 0
+    var src = ref.loadAddressAny(); //loadUint(2); // 00 = addr_none
+    var destAddress = ref.loadAddress();
+    var value = ref.loadCoins();
+    var ihr = ref.skip(1).loadCoins();
+    var fwd = ref.loadCoins();
+    var lt_create = ref.loadUint(64);
+    var unix_create = ref.loadUint(32);
+    var isInit = ref.loadBit();
+    var isBodyRef = ref.loadBit();
 }
 if (op == 1) {
     //deploy & install plugin payload
