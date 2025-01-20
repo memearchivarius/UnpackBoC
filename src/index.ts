@@ -1,9 +1,10 @@
-import { Cell, loadMessage, Slice } from "@ton/core";
+import { Address, beginCell, Cell, loadMessage, Slice } from "@ton/core";
 
 const extBoC = 'te6cckEBAwEArgABRYgByPhs6XS3ySU4PBGeUMPDkmbgdOO8DbnsEQjMyPjRINoMAQGcIvyyo+n+sjJxdy3qgsVqEpRshFegbvUxCEgiZaiCI8uLovDkgIIyfXcJ5aYY41j8SdGfIHkKrZvhvWaWE/G6ASmpoxdnbGt7AAAQJwADAgBqQgBQbFJh0GELp4LOrgEjC2Alr6yJUARIgNQ+yXkHVoi7vygXuufIAAAAAAAAAAAAAAAAAAA4Ye4w'
 const intBoC = 'te6cckEBBwEA3QADs2gB7ix8WDhQdzzFOCf6hmZ2Dzw2vFNtbavUArvbhXqqqmEAMpuMhx8zp7O3wqMokkuyFkklKpftc4Dh9_5bvavmCo-UXR6uVOIGMkCwAAAAAAC3GwLLUHl_4AYCAQCA_____________________________________________________________________________________gMBPAUEAwFDoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOAUACAAAAAAAAAANoAAAAAEIDF-r-4Q'
 
 const extHash = Cell.fromBase64(extBoC).hash().toString('hex');
+const msgcell = Cell.fromBase64(extBoC);
 const msg = loadMessage(Cell.fromBase64(extBoC).beginParse());
 const body = msg.body.beginParse().skip(512+32+32+32); //skip singnature, subwallet, vali_until, seqno
 const op = body.loadUint(8);
@@ -33,6 +34,7 @@ if (op == 3) {
 
 console.log(
     '\n Hash:', extHash,
+    '\n Cell tree: \n', msgcell,
     '\n', msg,
     '\n Ext_msg OP:', op,
     '\n In_msg mode:', mode,
@@ -48,6 +50,33 @@ console.log(
     '\n Body in ref?  ', isBodyRef,
     '\n Rest of the msg_body: ', ref
 );
+
+console.log('\n');
+console.log('\n');
+console.log('\n');
+console.log('Example of normalized external message grabbed from blockchain:');
+
+// https://explorer.toncoin.org/transaction?account=0:e47c3674ba5be4929c1e08cf2861e1c933703a71de06dcf6088466647c68906d&lt=52228866000001&hash=b21022c805f9795e3f4449d636d70567de14524fcbbd1b3a92f1622862e13b93
+const wrongHash = 'C14B39E64B9ED604474FE0AD9C8EEA1F736F884C04DA4AACE5D3D81ABDD6BEC0'
+console.log('\n Hash from explorer:', wrongHash);
+// https://toncenter.com/api/v3/transactions?account=UQDkfDZ0ulvkkpweCM8oYeHJM3A6cd4G3PYIhGZkfGiQbSUO&lt=52228866000001&limit=10&offset=0&sort=desc
+// Taken from in_msg: Body 
+const bodyBoC = 'te6cckEBAgEAiAABnCL8sqPp/rIycXct6oLFahKUbIRXoG71MQhIImWogiPLi6Lw5ICCMn13CeWmGONY/EnRnyB5Cq2b4b1mlhPxugEpqaMXZ2xrewAAECcAAwEAakIAUGxSYdBhC6eCzq4BIwtgJa+siVAESIDUPsl5B1aIu78oF7rnyAAAAAAAAAAAAAAAAAAA+LHs5A=='
+// Normalized ext_msg
+let externalMessage = beginCell()
+.storeUint(0b10, 2) // ext_msg prefix
+.storeUint(0, 2) // src -> addr_none
+.storeAddress(Address.parse('0:E47C3674BA5BE4929C1E08CF2861E1C933703A71DE06DCF6088466647C68906D')) // in_msg: Destination
+.storeCoins(0) // Import Fee
+.storeBit(0) // No State Init
+.storeBit(1) // We store Message Body as a reference
+.storeRef(Cell.fromBase64(bodyBoC)) // Store in_msg: Body as a reference
+.endCell();
+
+const newextBoC = externalMessage.toBoc().toString("base64");
+const newextHash = Cell.fromBase64(newextBoC).hash().toString('hex').toUpperCase();
+console.log('\n Normalized Hash:', newextHash);
+console.log('\n Normalized Cell tree: \n', externalMessage);
 
 /*
 https://docs.ton.org/v3/guidelines/smart-contracts/howto/wallet#internal-message-creation
