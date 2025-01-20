@@ -50,6 +50,8 @@ console.log(
 );
 
 /*
+https://docs.ton.org/v3/guidelines/smart-contracts/howto/wallet#internal-message-creation
+https://docs.ton.org/v3/guidelines/smart-contracts/howto/wallet#external-message-creation
 
 let internalMessage = beginCell()
   .storeUint(0, 1) // indicate that it is an internal message -> int_msg_info$0
