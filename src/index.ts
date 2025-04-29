@@ -1,0 +1,135 @@
+import { Address, beginCell, Cell, loadMessage, Slice } from "@ton/core";
+
+const extBoC = ''
+
+const extHash = Cell.fromBase64(extBoC).hash().toString('hex');
+const msgcell = Cell.fromBase64(extBoC);
+const msg = loadMessage(Cell.fromBase64(extBoC).beginParse());
+const rawBody = msg.body;
+const body = msg.body.beginParse().skip(512+32+32+32); //skip singnature, subwallet, vali_until, seqno
+const op = body.loadUint(8);
+
+// Extract bodyBoC
+const extractedBodyBoC = rawBody.toBoc().toString('base64');
+console.log('Extracted bodyBoC:', extractedBodyBoC);
+
+if (op == 0) { //send int_msg
+    var mode = body.loadUint(8);
+    var ref = body.loadRef().beginParse();
+    var head = ref.loadUint(4);
+    var src = ref.loadAddressAny();
+    var destAddress = ref.loadAddress();
+    var value = ref.loadCoins();
+    var ihr = ref.skip(1).loadCoins();
+    var fwd = ref.loadCoins();
+    var lt_create = ref.loadUint(64);
+    var unix_create = ref.loadUint(32);
+    var isInit = ref.loadBit();
+    var stateInit: Cell | null = null;
+    if (isInit) {
+        stateInit = ref.loadRef();
+    }
+    var isBodyRef = ref.loadBit();
+}
+if (op == 1) {
+    //deploy & install plugin payload
+    }
+if (op == 2) {
+    //install plugin
+}
+if (op == 3) {
+    //remove plugin
+}
+
+console.log(
+    '\n Hash:', extHash,
+    '\n Cell tree: \n', msgcell,
+    '\n', msg,
+    '\n Ext_msg OP:', op,
+    '\n In_msg mode:', mode,
+    '\n First 4 bit of in_msg in decimal: ', head,
+    '\n Src_addr: ', src,
+    '\n Dst_addr: ', destAddress,
+    '\n msg_value:', value,
+    '\n IHR fee: ', ihr,
+    '\n FWD fee: ', fwd,
+    '\n lt:   ', lt_create,
+    '\n unix: ', unix_create,
+    '\n Init present? ', isInit,
+    '\n Body in ref?  ', isBodyRef,
+    '\n Rest of the msg_body: ', ref
+);
+
+console.log('\n');
+console.log('\n');
+console.log('\n');
+
+// Normalized ext_msg
+let externalMessage = beginCell()
+    .storeUint(0b10, 2) // ext_msg prefix (10 in binary)
+    .storeUint(0, 2) // src -> addr_none
+    .storeAddress(msg.info.dest) // dest address from msg.info
+    .storeCoins(0) // import_fee:Grams -> 0
+    .storeBit(false) // init:(Maybe (Either StateInit ^StateInit)) -> nothing$0
+    .storeBit(true) // body:(Either X ^X) -> right$1
+    .storeRef(Cell.fromBase64(extractedBodyBoC)) // Store body as reference
+    .endCell();
+
+const newextBoC = externalMessage.toBoc().toString("base64");
+const newextHash = Cell.fromBase64(newextBoC).hash();
+console.log('\n Normalized Hash:', Buffer.from(newextHash).toString('base64'));
+console.log('\n Normalized Cell tree: \n', externalMessage);
+
+/*
+https://docs.ton.org/v3/guidelines/smart-contracts/howto/wallet#internal-message-creation
+https://docs.ton.org/v3/guidelines/smart-contracts/howto/wallet#external-message-creation
+
+let internalMessage = beginCell()
+  .storeUint(0, 1) // indicate that it is an internal message -> int_msg_info$0
+  .storeBit(1) // IHR Disabled
+  .storeBit(0) // bounce
+  .storeBit(0) // bounced
+  .storeUint(0, 2) // src -> addr_none
+  .storeAddress(walletAddress)
+  .storeCoins(toNano("0.2")) // amount
+  .storeBit(0) // Extra currency
+  .storeCoins(0) // IHR Fee
+  .storeCoins(0) // Forwarding Fee
+  .storeUint(0, 64) // Logical time of creation
+  .storeUint(0, 32) // UNIX time of creation
+  .storeBit(0) // No State Init
+  .storeBit(1) // We store Message Body as a reference
+  .storeRef(internalMessageBody) // Store Message Body as a reference
+  .endCell();
+
+() recv_external(slice in_msg) impure {
+  var signature = in_msg~load_bits(512);
+  var cs = in_msg;
+  var (subwallet_id, valid_until, msg_seqno) = (cs~load_uint(32), cs~load_uint(32), cs~load_uint(32));
+  throw_if(36, valid_until <= now());
+  var ds = get_data().begin_parse();
+  var (stored_seqno, stored_subwallet, public_key, plugins) = (ds~load_uint(32), ds~load_uint(32), ds~load_uint(256), ds~load_dict());
+  ds.end_parse();
+  throw_unless(33, msg_seqno == stored_seqno);
+  throw_unless(34, subwallet_id == stored_subwallet);
+  throw_unless(35, check_signature(slice_hash(in_msg), signature, public_key));
+  accept_message();
+  set_data(begin_cell()
+    .store_uint(stored_seqno + 1, 32)
+    .store_uint(stored_subwallet, 32)
+    .store_uint(public_key, 256)
+    .store_dict(plugins)
+    .end_cell());
+  commit();
+  cs~touch();
+  int op = cs~load_uint(8);
+
+  if (op == 0) { ;; simple send
+    while (cs.slice_refs()) {
+      var mode = cs~load_uint(8);
+      send_raw_message(cs~load_ref(), mode);
+    }
+    return (); ;; have already saved the storage
+  }
+
+*/
