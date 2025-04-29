@@ -6,39 +6,74 @@ const extHash = Cell.fromBase64(extBoC).hash().toString('hex');
 const msgcell = Cell.fromBase64(extBoC);
 const msg = loadMessage(Cell.fromBase64(extBoC).beginParse());
 const rawBody = msg.body;
-const body = msg.body.beginParse().skip(512+32+32+32); //skip singnature, subwallet, vali_until, seqno
-const op = body.loadUint(8);
+let body = msg.body.beginParse().skip(512+32+32+32); //skip singnature, subwallet, vali_until, seqno
+
+let op: number | null = null;
+let mode: number;
+
+// First byte could be either OP or Mode depending on wallet type
+const firstByte = body.loadUint(8);
+
+// Wallet type should be specified by the user
+// For V3: firstByte is Mode
+// For V4: firstByte is OP, next byte is Mode
+const walletType: 'v3' | 'v4' = 'v3'; // Default to V3, should be set by user
+
+if (walletType === 'v3') {
+    op = null;
+    mode = firstByte;
+} else {
+    op = firstByte;
+    mode = body.loadUint(8);
+}
 
 // Extract bodyBoC
 const extractedBodyBoC = rawBody.toBoc().toString('base64');
 console.log('Extracted bodyBoC:', extractedBodyBoC);
 
-if (op == 0) { //send int_msg
-    var mode = body.loadUint(8);
-    var ref = body.loadRef().beginParse();
-    var head = ref.loadUint(4);
-    var src = ref.loadAddressAny();
-    var destAddress = ref.loadAddress();
-    var value = ref.loadCoins();
-    var ihr = ref.skip(1).loadCoins();
-    var fwd = ref.loadCoins();
-    var lt_create = ref.loadUint(64);
-    var unix_create = ref.loadUint(32);
-    var isInit = ref.loadBit();
-    var stateInit: Cell | null = null;
-    if (isInit) {
-        stateInit = ref.loadRef();
+try {
+    if (op === 0) { //send int_msg for Wallet V4
+        var ref = body.loadRef().beginParse();
+        var head = ref.loadUint(4);
+        var src = ref.loadAddressAny();
+        var destAddress = ref.loadAddress();
+        var value = ref.loadCoins();
+        var ihr = ref.skip(1).loadCoins();
+        var fwd = ref.loadCoins();
+        var lt_create = ref.loadUint(64);
+        var unix_create = ref.loadUint(32);
+        var isInit = ref.loadBit();
+        var stateInit: Cell | null = null;
+        if (isInit) {
+            stateInit = ref.loadRef();
+        }
+        var isBodyRef = ref.loadBit();
+    } else if (op === null) { // Wallet V3
+        var ref = body.loadRef().beginParse();
+        var head = ref.loadUint(4);
+        var src = ref.loadAddressAny();
+        var destAddress = ref.loadAddress();
+        var value = ref.loadCoins();
+        var ihr = ref.skip(1).loadCoins();
+        var fwd = ref.loadCoins();
+        var lt_create = ref.loadUint(64);
+        var unix_create = ref.loadUint(32);
+        var isInit = ref.loadBit();
+        var stateInit: Cell | null = null;
+        if (isInit) {
+            stateInit = ref.loadRef();
+        }
+        var isBodyRef = ref.loadBit();
+    // Wallet V4
+    } else if (op === 1) {
+        console.log('Deploy & install plugin operation detected');
+    } else if (op === 2) {
+        console.log('Install plugin operation detected');
+    } else if (op === 3) {
+        console.log('Remove plugin operation detected');
     }
-    var isBodyRef = ref.loadBit();
-}
-if (op == 1) {
-    //deploy & install plugin payload
-    }
-if (op == 2) {
-    //install plugin
-}
-if (op == 3) {
-    //remove plugin
+} catch (e) {
+    console.error('Error parsing message body:', e);
 }
 
 console.log(
