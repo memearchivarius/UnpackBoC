@@ -1,170 +1,404 @@
-import { Address, beginCell, Cell, loadMessage, Slice } from "@ton/core";
+import { Address, beginCell, Cell, toNano } from "@ton/core";
+import { TonClient, WalletContractV4, internal } from "@ton/ton";
+import { mnemonicToPrivateKey } from "@ton/crypto";
 
-const extBoC = ''
+// Configuration
+const MNEMONIC = process.env.TON_MNEMONIC?.split(" ") || [
+    "ticket", "sea", "movie", "present", "outer", "dash", "attract", "clip",
+    "pepper", "slow", "employ", "rubber", "one", "gentle", "razor", "step", 
+    "method", "alien", "cash", "tooth", "side", "green", "tired", "honey"
+];
 
-const extHash = Cell.fromBase64(extBoC).hash().toString('hex');
-const msgcell = Cell.fromBase64(extBoC);
-const msg = loadMessage(Cell.fromBase64(extBoC).beginParse());
-const rawBody = msg.body;
-let body = msg.body.beginParse().skip(512+32+32+32); //skip singnature, subwallet, vali_until, seqno
-
-let op: number | null = null;
-let mode: number;
-
-// First byte could be either OP or Mode depending on wallet type
-const firstByte = body.loadUint(8);
-
-// Wallet type should be specified by the user
-// For V3: firstByte is Mode
-// For V4: firstByte is OP, next byte is Mode
-const walletType: 'v3' | 'v4' = 'v3'; // Default to V3, should be set by user
-
-if (walletType === 'v3') {
-    op = null;
-    mode = firstByte;
-} else {
-    op = firstByte;
-    mode = body.loadUint(8);
+// Utility functions
+function createTextMessage(text: string): Cell {
+    return beginCell()
+        .storeUint(0, 32)
+        .storeStringTail(text)
+        .endCell();
 }
 
-// Extract bodyBoC
-const extractedBodyBoC = rawBody.toBoc().toString('base64');
-console.log('Extracted bodyBoC:', extractedBodyBoC);
-
-try {
-    if (op === 0) { //send int_msg for Wallet V4
-        var ref = body.loadRef().beginParse();
-        var head = ref.loadUint(4);
-        var src = ref.loadAddressAny();
-        var destAddress = ref.loadAddress();
-        var value = ref.loadCoins();
-        var ihr = ref.skip(1).loadCoins();
-        var fwd = ref.loadCoins();
-        var lt_create = ref.loadUint(64);
-        var unix_create = ref.loadUint(32);
-        var isInit = ref.loadBit();
-        var stateInit: Cell | null = null;
-        if (isInit) {
-            stateInit = ref.loadRef();
-        }
-        var isBodyRef = ref.loadBit();
-    } else if (op === null) { // Wallet V3
-        var ref = body.loadRef().beginParse();
-        var head = ref.loadUint(4);
-        var src = ref.loadAddressAny();
-        var destAddress = ref.loadAddress();
-        var value = ref.loadCoins();
-        var ihr = ref.skip(1).loadCoins();
-        var fwd = ref.loadCoins();
-        var lt_create = ref.loadUint(64);
-        var unix_create = ref.loadUint(32);
-        var isInit = ref.loadBit();
-        var stateInit: Cell | null = null;
-        if (isInit) {
-            stateInit = ref.loadRef();
-        }
-        var isBodyRef = ref.loadBit();
-    // Wallet V4
-    } else if (op === 1) {
-        console.log('Deploy & install plugin operation detected');
-    } else if (op === 2) {
-        console.log('Install plugin operation detected');
-    } else if (op === 3) {
-        console.log('Remove plugin operation detected');
-    }
-} catch (e) {
-    console.error('Error parsing message body:', e);
+function createExternalMessageWithInit(
+    to: Address,
+    body: Cell,
+    importFee: bigint = 0n,
+    init: Cell
+): Cell {
+    return beginCell()
+        .storeUint(0b10, 2) // ext_in_msg_info$10
+        .storeUint(0, 2) // src addr_none
+        .storeAddress(to)
+        .storeCoins(importFee)
+        .storeBit(true) // has_init
+        .storeRef(init) // state_init
+        .storeBit(true) // body_in_ref
+        .storeRef(body)
+        .endCell();
 }
 
-console.log(
-    '\n Hash:', extHash,
-    '\n Cell tree: \n', msgcell,
-    '\n', msg,
-    '\n Ext_msg OP:', op,
-    '\n In_msg mode:', mode,
-    '\n First 4 bit of in_msg in decimal: ', head,
-    '\n Src_addr: ', src,
-    '\n Dst_addr: ', destAddress,
-    '\n msg_value:', value,
-    '\n IHR fee: ', ihr,
-    '\n FWD fee: ', fwd,
-    '\n lt:   ', lt_create,
-    '\n unix: ', unix_create,
-    '\n Init present? ', isInit,
-    '\n Body in ref?  ', isBodyRef,
-    '\n Rest of the msg_body: ', ref
-);
+function createNormalizedExternalMessage(to: Address, body: Cell): Cell {
+    return beginCell()
+        .storeUint(0b10, 2) // ext_in_msg_info$10
+        .storeUint(0, 2) // src addr_none
+        .storeAddress(to)
+        .storeCoins(0) // import_fee = 0
+        .storeBit(false) // no init
+        .storeBit(true) // body_in_ref
+        .storeRef(body)
+        .endCell();
+}
 
-console.log('\n');
-console.log('\n');
-console.log('\n');
-
-// Normalized ext_msg
-let externalMessage = beginCell()
-    .storeUint(0b10, 2) // ext_msg prefix (10 in binary)
-    .storeUint(0, 2) // src -> addr_none
-    .storeAddress(msg.info.dest) // dest address from msg.info
-    .storeCoins(0) // import_fee:Grams -> 0
-    .storeBit(false) // init:(Maybe (Either StateInit ^StateInit)) -> nothing$0
-    .storeBit(true) // body:(Either X ^X) -> right$1
-    .storeRef(Cell.fromBase64(extractedBodyBoC)) // Store body as reference
-    .endCell();
-
-const newextBoC = externalMessage.toBoc().toString("base64");
-const newextHash = Cell.fromBase64(newextBoC).hash();
-console.log('\n Normalized Hash:', Buffer.from(newextHash).toString('base64'));
-console.log('\n Normalized Cell tree: \n', externalMessage);
-
-/*
-https://docs.ton.org/v3/guidelines/smart-contracts/howto/wallet#internal-message-creation
-https://docs.ton.org/v3/guidelines/smart-contracts/howto/wallet#external-message-creation
-
-let internalMessage = beginCell()
-  .storeUint(0, 1) // indicate that it is an internal message -> int_msg_info$0
-  .storeBit(1) // IHR Disabled
-  .storeBit(0) // bounce
-  .storeBit(0) // bounced
-  .storeUint(0, 2) // src -> addr_none
-  .storeAddress(walletAddress)
-  .storeCoins(toNano("0.2")) // amount
-  .storeBit(0) // Extra currency
-  .storeCoins(0) // IHR Fee
-  .storeCoins(0) // Forwarding Fee
-  .storeUint(0, 64) // Logical time of creation
-  .storeUint(0, 32) // UNIX time of creation
-  .storeBit(0) // No State Init
-  .storeBit(1) // We store Message Body as a reference
-  .storeRef(internalMessageBody) // Store Message Body as a reference
-  .endCell();
-
-() recv_external(slice in_msg) impure {
-  var signature = in_msg~load_bits(512);
-  var cs = in_msg;
-  var (subwallet_id, valid_until, msg_seqno) = (cs~load_uint(32), cs~load_uint(32), cs~load_uint(32));
-  throw_if(36, valid_until <= now());
-  var ds = get_data().begin_parse();
-  var (stored_seqno, stored_subwallet, public_key, plugins) = (ds~load_uint(32), ds~load_uint(32), ds~load_uint(256), ds~load_dict());
-  ds.end_parse();
-  throw_unless(33, msg_seqno == stored_seqno);
-  throw_unless(34, subwallet_id == stored_subwallet);
-  throw_unless(35, check_signature(slice_hash(in_msg), signature, public_key));
-  accept_message();
-  set_data(begin_cell()
-    .store_uint(stored_seqno + 1, 32)
-    .store_uint(stored_subwallet, 32)
-    .store_uint(public_key, 256)
-    .store_dict(plugins)
-    .end_cell());
-  commit();
-  cs~touch();
-  int op = cs~load_uint(8);
-
-  if (op == 0) { ;; simple send
-    while (cs.slice_refs()) {
-      var mode = cs~load_uint(8);
-      send_raw_message(cs~load_ref(), mode);
+// Normalize real external message according to TEP-467
+function normalizeRealExternalMessage(originalMessage: Cell): Cell {
+    // For wallet V4 external messages, we need to extract the internal message
+    // and create a normalized external message with that internal message as body
+    const slice = originalMessage.beginParse();
+    slice.skip(2); // skip msg type (should be 0b10)
+    slice.skip(2); // skip src (should be addr_none)
+    const dest = slice.loadAddress();
+    slice.loadCoins(); // skip import_fee
+    const hasInit = slice.loadBit();
+    if (hasInit) {
+        slice.loadRef(); // skip state_init
     }
-    return (); ;; have already saved the storage
-  }
+    const hasBodyRef = slice.loadBit();
+    
+    if (!hasBodyRef || slice.remainingRefs === 0) {
+        throw new Error("Expected body reference in external message");
+    }
+    
+    // The body contains the wallet's signed internal message
+    const signedBody = slice.loadRef();
+    
+    // Parse signed body to extract the internal message
+    const signedSlice = signedBody.beginParse();
+    signedSlice.skip(512); // skip signature
+    signedSlice.loadUint(32); // subwallet_id
+    signedSlice.loadUint(32); // valid_until
+    signedSlice.loadUint(32); // seqno
+    signedSlice.loadUint(8); // mode
+    
+    // The internal message is the next reference
+    if (signedSlice.remainingRefs === 0) {
+        throw new Error("Expected internal message reference");
+    }
+    
+    const internalMessage = signedSlice.loadRef();
+    
+    // Create TEP-467 normalized version with internal message as body
+    return beginCell()
+        .storeUint(0b10, 2) // ext_in_msg_info$10
+        .storeUint(0, 2) // src addr_none
+        .storeAddress(dest)
+        .storeCoins(0) // import_fee = 0 (normalized)
+        .storeBit(false) // no init (normalized)
+        .storeBit(true) // body_in_ref
+        .storeRef(internalMessage)
+        .endCell();
+}
 
-*/
+// --- Поиск ext_in_msg_info$10 в Cell (рекурсивно) ---
+function findExternalMsgCell(cell: Cell): Cell {
+    try {
+        const slice = cell.beginParse();
+        const msgType = slice.loadUint(2);
+        if (msgType === 0b10) {
+            return cell;
+        }
+    } catch (e) {
+        // не удалось распарсить, идём дальше
+    }
+    // Если нет — пробуем первый реф (envelope)
+    if (cell.refs.length > 0) {
+        try {
+            return findExternalMsgCell(cell.refs[0]);
+        } catch (e) {
+            // fallback: пробуем остальные рефы
+            for (let i = 1; i < cell.refs.length; i++) {
+                try {
+                    return findExternalMsgCell(cell.refs[i]);
+                } catch {}
+            }
+        }
+    }
+    throw new Error("Cannot find ext_in_msg_info$10 in cell or its refs");
+}
+
+function normalizeExternalMessageTEP467(original: Cell): Cell {
+    // Для Wallet V4: корневой Cell — подпись + метаданные + body (в рефе)
+    const slice = original.beginParse();
+    slice.skip(512); // подпись
+    slice.loadUint(32); // subwallet_id
+    slice.loadUint(32); // valid_until
+    slice.loadUint(32); // seqno
+    slice.loadUint(8);  // mode
+    if (original.refs.length === 0) {
+        throw new Error('External message has no refs (expected body in ref)');
+    }
+    const extCell = original.refs[0]; // ext_in_msg_info$10
+    const extSlice = extCell.beginParse();
+    const msgType = extSlice.loadUint(2); // 0b10
+    if (msgType !== 0b10) throw new Error("Not an external message (in body ref)");
+    const srcAddrType = extSlice.loadUint(2);
+    const dest = extSlice.loadAddress();
+    const importFee = extSlice.loadCoins();
+    const hasInit = extSlice.loadBit();
+    let body: Cell;
+    if (hasInit) {
+        extSlice.loadRef();
+    }
+    const hasBodyRef = extSlice.loadBit();
+    if (hasBodyRef) {
+        body = extSlice.loadRef();
+    } else {
+        body = extSlice.asCell();
+    }
+    // Диагностика
+    console.log('normalizeExternalMessageTEP467:');
+    console.log('  srcAddrType:', srcAddrType);
+    console.log('  dest:', dest.toString());
+    console.log('  importFee:', importFee.toString());
+    if (dest.toString() === '0:0000000000000000000000000000000000000000000000000000000000000000') {
+        console.error('❌ Ошибка: dest = 0! Структура сообщения:');
+        console.error(extCell.toString());
+        throw new Error('Invalid dest address in external message');
+    }
+    return beginCell()
+        .storeUint(0b10, 2)
+        .storeUint(srcAddrType, 2)
+        .storeAddress(dest)
+        .storeCoins(importFee)
+        .storeBit(false)
+        .storeBit(true)
+        .storeRef(body)
+        .endCell();
+}
+
+// --- Диагностика: вывод дерева Cell ---
+function printCellTree(cell: Cell, depth = 0) {
+    const indent = ' '.repeat(depth * 2);
+    console.log(`${indent}Cell: ${cell.hash().toString('hex')}`);
+    console.log(`${indent}Bits: x{${cell.bits.toString('hex')}}`);
+    for (let i = 0; i < cell.refs.length; i++) {
+        printCellTree(cell.refs[i], depth + 1);
+    }
+}
+
+// API functions with rate limiting
+async function sleep(seconds: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+}
+
+async function apiCallWithRetry<T>(
+    apiCall: () => Promise<T>, 
+    maxRetries: number = 3, 
+    delaySeconds: number = 3
+): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            if (attempt > 1) await sleep(delaySeconds);
+            return await apiCall();
+        } catch (error: any) {
+            const isRateLimit = error?.response?.status === 429 || error?.status === 429;
+            if (attempt === maxRetries) throw error;
+            if (isRateLimit) await sleep(delaySeconds * attempt);
+        }
+    }
+    throw new Error("Max retries exceeded");
+}
+
+async function findTransactionByHashV3(address: string, txHash: string): Promise<any | null> {
+    try {
+        await sleep(1); // Rate limiting
+        const url = `https://testnet.toncenter.com/api/v3/transactions?account=${address}&limit=5&offset=0&sort=desc`;
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json() as any;
+        const txHashBase64 = Buffer.from(txHash, 'hex').toString('base64');
+        
+        console.log(`Searching for hash: ${txHash} (base64: ${txHashBase64})`);
+        console.log(`Found ${data.transactions?.length || 0} transactions`);
+        
+        for (const tx of data.transactions || []) {
+            // Check all possible hash fields
+            const checks = [
+                { field: 'tx.hash', value: tx.hash },
+                { field: 'tx.in_msg.hash', value: tx.in_msg?.hash },
+                { field: 'tx.in_msg.message_content.hash', value: tx.in_msg?.message_content?.hash },
+                { field: 'tx.in_msg.message_content.body_hash', value: tx.in_msg?.message_content?.body_hash },
+                { field: 'tx.in_msg.hash_norm', value: tx.in_msg?.hash_norm }
+            ];
+            
+            for (const check of checks) {
+                if (check.value === txHashBase64) {
+                    console.log(`✅ Found match in ${check.field}`);
+                    console.log(`   Search hash: ${txHash}`);
+                    console.log(`   Found hash:  ${check.value} (base64)`);
+                    console.log(`   Tx hash:     ${tx.hash}`);
+                    console.log(`   In msg hash: ${tx.in_msg?.hash}`);
+                    console.log(`   Hash norm:   ${tx.in_msg?.hash_norm}`);
+                    
+                    // Always use transaction hash for TonScan link
+                    const linkHash = tx.hash;
+                    
+                    return {
+                        found: true,
+                        hash: txHash,
+                        type: check.field,
+                        transaction: tx,
+                        linkHash: linkHash
+                    };
+                }
+            }
+        }
+        
+        // Debug: show available hashes
+        console.log('Available hashes in recent transactions:');
+        for (let i = 0; i < Math.min(3, data.transactions?.length || 0); i++) {
+            const tx = data.transactions[i];
+            console.log(`  tx[${i}].hash: ${tx.hash}`);
+            console.log(`  tx[${i}].in_msg?.hash: ${tx.in_msg?.hash}`);
+            console.log(`  tx[${i}].in_msg?.hash_norm: ${tx.in_msg?.hash_norm}`);
+            console.log(`  tx[${i}].in_msg?.message_content?.hash: ${tx.in_msg?.message_content?.hash}`);
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Error searching transaction:', error);
+        return null;
+    }
+}
+
+async function searchBothHashes(address: string, originalHash: string, normalizedHash: string) {
+    console.log('Searching for transactions...');
+    
+    const originalResult = await findTransactionByHashV3(address, originalHash);
+    await sleep(1);
+    const normalizedResult = await findTransactionByHashV3(address, normalizedHash);
+    
+    console.log('\nSearch Results:');
+    console.log('Original hash found:', originalResult ? 'YES' : 'NO');
+    if (originalResult) {
+        console.log('  Type:', originalResult.type);
+        console.log('  Transaction LT:', originalResult.transaction.lt);
+        const linkHashHex = Buffer.from(originalResult.linkHash, 'base64').toString('hex');
+        console.log('  TonScan link:', `https://testnet.tonscan.org/tx/${linkHashHex}`);
+    }
+    
+    console.log('Normalized hash found:', normalizedResult ? 'YES' : 'NO');
+    if (normalizedResult) {
+        console.log('  Type:', normalizedResult.type);
+        console.log('  Transaction LT:', normalizedResult.transaction.lt);
+        const linkHashHex = Buffer.from(normalizedResult.linkHash, 'base64').toString('hex');
+        console.log('  TonScan link:', `https://testnet.tonscan.org/tx/${linkHashHex}`);
+    }
+    
+    return { originalResult, normalizedResult };
+}
+
+async function main() {
+    console.log('Hash Analysis with Real Transaction');
+    console.log('===================================');
+    
+    // Create message body
+    const messageBody = createTextMessage("Hello TON!");
+    console.log('Message Body Hash:', messageBody.hash().toString("hex"));
+
+    // Initialize wallet
+    const keyPair = await mnemonicToPrivateKey(MNEMONIC);
+    const wallet = WalletContractV4.create({ workchain: 0, publicKey: keyPair.publicKey });
+    const walletAddress = wallet.address;
+    console.log('Wallet Address:', walletAddress.toString());
+
+    try {
+        const client = new TonClient({ 
+            endpoint: "https://testnet.toncenter.com/api/v2/jsonRPC" 
+        });
+        const contract = client.open(wallet);
+
+        // Get wallet data
+        const seqno = await apiCallWithRetry(() => contract.getSeqno());
+        const balance = await apiCallWithRetry(() => contract.getBalance());
+        console.log('Current seqno:', seqno);
+        console.log('Wallet balance:', balance.toString(), 'nanotons');
+
+        if (balance < toNano("0.02")) {
+            console.log('Insufficient balance for transaction');
+            return;
+        }
+
+        // Create original external message via wrapper
+        const internalMessage = internal({
+            to: walletAddress,
+            value: toNano("0.01"),
+            body: messageBody
+        });
+
+        const externalMessage = await contract.createTransfer({
+            seqno,
+            secretKey: keyPair.secretKey,
+            messages: [internalMessage]
+        });
+        
+        const originalHash = externalMessage.hash().toString("hex");
+        const originalBoC = externalMessage.toBoc().toString("base64");
+        
+        console.log('\nOriginal External Message Hash:', originalHash);
+        console.log('Original External Message BoC:', originalBoC);
+
+        // Create normalized version using the internal message directly (legacy, incorrect)
+        const normalizedExternalMessage = createNormalizedExternalMessage(walletAddress, internalMessage.body);
+        const normalizedHash = normalizedExternalMessage.hash().toString("hex");
+        const normalizedBoC = normalizedExternalMessage.toBoc().toString("base64");
+        
+        console.log('\nNormalized External Message Hash (legacy, incorrect):', normalizedHash);
+        console.log('Normalized External Message BoC (legacy, incorrect):', normalizedBoC);
+        
+        // --- Correct TEP-467 normalization ---
+        console.log('=== Cell tree structure ===');
+        printCellTree(externalMessage);
+        const normalizedTEP467 = normalizeExternalMessageTEP467(externalMessage);
+        const normalizedTEP467Hash = normalizedTEP467.hash().toString("hex");
+        const normalizedTEP467BoC = normalizedTEP467.toBoc().toString("base64");
+        
+        console.log('\nNormalized External Message Hash (TEP-467, correct):', normalizedTEP467Hash);
+        console.log('Normalized External Message BoC (TEP-467, correct):', normalizedTEP467BoC);
+        console.log('NOTE: Этот хеш должен совпадать с blockchain hash_norm для ЭТОЙ транзакции!');
+        
+        // Hash comparison
+        console.log('\nHash Comparison:');
+        console.log('Original Hash:   ', originalHash);
+        console.log('Normalized Hash (legacy): ', normalizedHash);
+        console.log('Normalized Hash (TEP-467):', normalizedTEP467Hash);
+        console.log('Hashes Equal (original == legacy):    ', originalHash === normalizedHash ? 'YES' : 'NO');
+        console.log('Hashes Equal (original == TEP-467):   ', originalHash === normalizedTEP467Hash ? 'YES' : 'NO');
+        console.log('Hashes Equal (TEP-467 == blockchain hash_norm): Проверьте вручную!');
+        
+        // Send transaction
+        console.log('\nSending transaction...');
+        await apiCallWithRetry(async () => {
+            await contract.send(externalMessage);
+            return true;
+        });
+        console.log('Transaction sent successfully');
+        console.log('External message hash:', originalHash);
+
+        // Wait for blockchain propagation
+        console.log('Waiting for blockchain propagation...');
+        await sleep(15); // Increased wait time for indexing
+        
+        // Search for both hashes
+        await searchBothHashes(walletAddress.toString(), originalHash, normalizedTEP467Hash);
+        
+        console.log('\nTonScan link: https://testnet.tonscan.org/address/' + walletAddress.toString());
+
+    } catch (error: any) {
+        console.error('Error:', error.message || error);
+    }
+}
+
+main().catch(console.error);
+
